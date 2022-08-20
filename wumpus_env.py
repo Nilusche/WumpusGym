@@ -17,21 +17,21 @@ WIDTH = 400
 SQ_SIZE = WIDTH // ROWS
 IMAGES = {}
 
-INITIAL_BOARD = [
+INITIAL_BOARD = np.array([
     ['_', '_', '_', 'P'],
     ['W', 'G', 'P', '_'],
     ['_', '_', '_', '_'],
     ['A_UP', '_', 'P', '_']
-]
+])
 
-other_board = [
+other_board =  np.array([
     ['_', '_', '_', 'P'],
     ['_', 'P', 'P', '_'],
     ['W', 'A_UP', '_', '_'],
     ['_', '_', 'P', '_']
-]
+])
 
-ACTION_SPACE = ["WALK", "TURNLEFT" , "TURNRIGHT", "SHOOT", "GRAB", "CLIMB"]
+#ACTION_SPACE = ["WALK", "TURNLEFT" , "TURNRIGHT", "SHOOT", "GRAB", "CLIMB"]
 
 def load_images():
     pieces = ["W", "P", "G", "A_UP", "A_DOWN", "A_LEFT", "A_RIGHT"]
@@ -57,7 +57,8 @@ def draw_game(win, board):
 
 class Wumpus(gym.Env):
     def __init__(self):
-        self.action_space = spaces.Discrete(4)
+        self.observation_space = spaces.Discrete(11)
+        self.action_space = spaces.Discrete(6)
         self.frame_size_x = WIDTH
         self.frame_size_y = WIDTH
         self.screen  = pygame.display.set_mode((self.frame_size_x, self.frame_size_y))
@@ -68,20 +69,19 @@ class Wumpus(gym.Env):
 
     def reset(self):
         self.screen.fill(WHITE)
-        self.player_x = 1
-        self.player_y = 2
+        self.board = INITIAL_BOARD
+        self.player_x = list(zip(*np.where(self.board == "A_UP")))[0][0]
+        self.player_y = list(zip(*np.where(self.board == "A_UP")))[0][1]
         self.wumpus_x = 0
         self.wumpus_y = 1
         self.player_direction = "UP"
         self.player_alive = True
         self.player_arrows = 1
         self.gold = False
-        self.wumpus_alive = True
         self.scream = False
-        self.board = INITIAL_BOARD
         self.stench = Wumpus.check_stench(self.board, self.player_x, self.player_y)
         self.breeze = Wumpus.check_breeze(self.board, self.player_x, self.player_y)
-        self.glitter = False
+        self.glitter = Wumpus.check_glitter(self.board, self.player_x, self.player_y)
         self.bump = False
         self.steps = 0
         
@@ -125,10 +125,20 @@ class Wumpus(gym.Env):
             
         return False
 
+    @staticmethod
+    def check_glitter(board, x, y):
+        #If the player is on the same square as the gold, the player can grab the gold
+        if board[y][x] == "G":
+            return True
+        return False
+
     def render(self, mode="human"):
         if mode == "human": 
             load_images()
             draw_game(self.screen, INITIAL_BOARD)  
+            pygame.display.flip()
+        else:
+            print(self.board)
 
     @staticmethod
     def change_direction(direction, action):    
@@ -151,15 +161,19 @@ class Wumpus(gym.Env):
             elif direction == "RIGHT":
                 return "DOWN"
         return direction
+
+
     
 
 
         
 
     def step(self, action):
-        if action == 1 or action == 2:
+        if action == 1 or action == 2: # Turn left or right
             self.player_direction = self.change_direction(self.player_direction, action)
-        elif action == 0:
+            ## change picture to direction
+            self.board[self.player_y][self.player_x] = "A" + self.player_direction
+        elif action == 0: # Walk forward
             if self.player_direction == "UP":
                 self.player_y -= 1
             elif self.player_direction == "DOWN":
@@ -168,33 +182,45 @@ class Wumpus(gym.Env):
                 self.player_x -= 1
             elif self.player_direction == "RIGHT":
                 self.player_x += 1
-        elif action == 3:
+        elif action == 3: # Shoot an arrow
             pass
-        elif action == 4:
-            pass
-        elif action == 5:
-            pass
-            
+        elif action == 4: # Grab the gold   
+            if self.board[self.player_y][self.player_x] == "G":
+                self.gold = True
+                self.board[self.player_y][self.player_x] = "_"
+        elif action == 5: # Climb up the ladder
+            #check if player is at start position:
+            if self.player_x == 1 and self.player_y == 2:
+                pass
         
-        observation = {"x": self.player_x + 1, "y": self.player_y + 1 , "direction": self.player_direction, "alive": self.player_alive, "gold": self.gold, "wumpus_alive": self.wumpus_alive ,"stench": self.stench, "breeze": self.breeze, "glitter": self.glitter, "bump": self.bump, "scream": self.scream}
-        info = {"alive": self.player_alive, "gold": self.gold, "wumpus_alive": self.wumpus_alive, "steps": self.steps}
+        observation = self.get_observation()
+        info = {"alive": self.player_alive, "gold": self.gold, "steps": self.steps}
         reward = self.reward_handler()
 
         reward, done = self.game_over(reward, self.board)
             
         return observation, reward, done, info
 
+    def get_observation(self):
+        observation = []
+        observation.append(self.player_x)
+        observation.append(self.player_y)
+        observation.append(self.stench)
+        observation.append(self.breeze)
+        observation.append(self.glitter)
+        observation.append(self.bump)
+        observation.append(self.player_arrows)
+        observation.append(self.player_direction)
+
+        return observation
+        
+        
 
     def reward_handler(self):
-        if self.player_alive == False:
-            return -1000
-        if self.player_arrows == 0 and self.wumpus_alive == True:
+        if self.player_arrows == 0 and self.scream == False:
             return -10
-        if self.player_arrows == 0 and self.wumpus_alive == False:
+        if self.player_arrows == 0 and self.scream == True:
             return 100
-        if self.gold == True:
-            return 1000
-        
         return -1
             
 
@@ -229,10 +255,11 @@ class Wumpus(gym.Env):
 
 
 w = Wumpus()
-print("x, y", w.player_x, w.player_y)
-print(other_board[w.player_y][w.player_x])
-print(w.stench)
-print(w.breeze)
+w.render()
+#print("x, y", w.player_x, w.player_y)
+#print(other_board[w.player_y][w.player_x])
+#print(w.stench)
+#print(w.breeze)
 
         
     
